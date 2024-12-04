@@ -20,7 +20,8 @@ export function Map() {
   const map = useRef<mapboxgl.Map | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
   const markersRef = useRef<{ [key: string]: mapboxgl.Marker }>({});
-  const midpointMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const midpointSourceRef = useRef<string | null>(null);
+  const linesRef = useRef<mapboxgl.AnySourceImpl[]>([]);
 
   useEffect(() => {
     if (!mapContainer.current) return;
@@ -28,13 +29,13 @@ export function Map() {
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/streets-v12',
-      center: [-74.5, 40],
-      zoom: 9
+      center: [2.3522, 48.8566],
+      zoom: 5
     });
 
     const geocoder = new MapboxGeocoder({
       accessToken: mapboxgl.accessToken,
-      mapboxgl: mapboxgl,
+      mapboxgl: mapboxgl as any,
       marker: false,
     });
 
@@ -48,7 +49,7 @@ export function Map() {
         coordinates: result.center as [number, number],
       };
 
-      const marker = new mapboxgl.Marker({ color: '#EF4444' })
+      const marker = new mapboxgl.Marker({ color: '#FFCF00' })
         .setLngLat(newLocation.coordinates)
         .setPopup(new mapboxgl.Popup().setHTML(newLocation.name))
         .addTo(map.current!);
@@ -69,6 +70,19 @@ export function Map() {
   const calculateMidpoint = (locs: Location[]) => {
     if (locs.length < 2) return;
 
+    linesRef.current.forEach(source => {
+      if (map.current?.getSource(source.id)) {
+        map.current.removeLayer(source.id);
+        map.current.removeSource(source.id);
+      }
+    });
+    linesRef.current = [];
+
+    if (midpointSourceRef.current && map.current?.getSource(midpointSourceRef.current)) {
+      map.current.removeLayer('midpoint-layer');
+      map.current.removeSource(midpointSourceRef.current);
+    }
+
     const sumLat = locs.reduce((sum, loc) => sum + loc.coordinates[1], 0);
     const sumLng = locs.reduce((sum, loc) => sum + loc.coordinates[0], 0);
     const midpoint: [number, number] = [
@@ -76,14 +90,66 @@ export function Map() {
       sumLat / locs.length
     ];
 
-    if (midpointMarkerRef.current) {
-      midpointMarkerRef.current.remove();
-    }
+    const midpointSourceId = 'midpoint-source';
+    map.current?.addSource(midpointSourceId, {
+      type: 'geojson',
+      data: {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'Point',
+          coordinates: midpoint
+        }
+      }
+    });
 
-    midpointMarkerRef.current = new mapboxgl.Marker({ color: '#22C55E' })
-      .setLngLat(midpoint)
-      .setPopup(new mapboxgl.Popup().setHTML('Optimal Meeting Point'))
-      .addTo(map.current!);
+    map.current?.addLayer({
+      id: 'midpoint-layer',
+      type: 'circle',
+      source: midpointSourceId,
+      paint: {
+        'circle-radius': 6,
+        'circle-color': '#FFCF00',
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#000000'
+      }
+    });
+
+    midpointSourceRef.current = midpointSourceId;
+
+    locs.forEach((loc, index) => {
+      const sourceId = `line-${index}`;
+      map.current?.addSource(sourceId, {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              loc.coordinates,
+              midpoint
+            ]
+          }
+        }
+      });
+
+      map.current?.addLayer({
+        id: sourceId,
+        type: 'line',
+        source: sourceId,
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#FFCF00',
+          'line-width': 3
+        }
+      });
+
+      linesRef.current.push(map.current?.getSource(sourceId)!);
+    });
 
     const bounds = new mapboxgl.LngLatBounds();
     locs.forEach(loc => bounds.extend(loc.coordinates));
@@ -98,15 +164,26 @@ export function Map() {
   };
 
   const removeLocation = (id: string) => {
+    linesRef.current.forEach(source => {
+      if (map.current?.getSource(source.id)) {
+        map.current.removeLayer(source.id);
+        map.current.removeSource(source.id);
+      }
+    });
+    linesRef.current = [];
+
+    if (midpointSourceRef.current && map.current?.getSource(midpointSourceRef.current)) {
+      map.current.removeLayer('midpoint-layer');
+      map.current.removeSource(midpointSourceRef.current);
+      midpointSourceRef.current = null;
+    }
+
     markersRef.current[id]?.remove();
     delete markersRef.current[id];
     setLocations(prev => {
       const newLocations = prev.filter(loc => loc.id !== id);
       if (newLocations.length >= 2) {
         calculateMidpoint(newLocations);
-      } else if (midpointMarkerRef.current) {
-        midpointMarkerRef.current.remove();
-        midpointMarkerRef.current = null;
       }
       return newLocations;
     });
