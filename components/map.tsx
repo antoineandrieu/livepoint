@@ -57,6 +57,12 @@ export function Map() {
       markersRef.current[newLocation.id] = marker;
       setLocations(prev => [...prev, newLocation]);
       
+      map.current?.flyTo({
+        center: newLocation.coordinates,
+        zoom: 6,
+        duration: 1500
+      });
+      
       if (locations.length >= 1) {
         calculateMidpoint([...locations, newLocation]);
       }
@@ -156,7 +162,7 @@ export function Map() {
     bounds.extend(midpoint);
     
     map.current?.fitBounds(bounds, {
-      padding: 50,
+      padding: 100,
       duration: 1000
     });
 
